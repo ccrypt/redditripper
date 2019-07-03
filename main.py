@@ -2,7 +2,7 @@ import requests as req
 import os
 import shutil
 import threading
-from time import time
+from time import time, sleep
 from math import ceil
 
 if os.name == "nt": # Check if Windows or Linux
@@ -15,7 +15,9 @@ class Download():
         self.subs = [ sub.rstrip("\n") for sub in open("subreddits.txt") ]
         self.data = {}
         self.fileTypeList = [ "jpg", "jpeg", "png", "gif" ]
-        self.timeStarted = time()
+        self.files = 0
+        self.successful = 0;
+        self.failed = 0;
 
     def getPostsBySub(self):
         for sub in self.subs:
@@ -28,6 +30,7 @@ class Download():
                 continue
 
             self.data[sub] = [ data['data']['url'] for data in res['data']['children'] ]
+            self.files += len(self.data[sub])
 
     def makeSubDirs(self):
         for sub in self.subs:
@@ -37,6 +40,11 @@ class Download():
                 os.makedirs(path)
 
     def downloadAllImages(self):
+        print(  "\n***********************************************",
+                "[+] Starting download of %d images in 2 seconds" %(self.files),
+                "***********************************************\n", sep="\n")
+        sleep(2)
+        self.timeStarted = time()
         for sub in self.subs:
             t = []
             for url in self.data[sub]:
@@ -50,31 +58,32 @@ class Download():
 
                 try:
                     if filename[(filename.rfind(".")+1):] not in self.fileTypeList:
-                        print("[?] Filetype not allowed")
+                        print("[?] Filetype %s not allowed" %(filename[(filename.rfind(".")+1):]))
                         continue
                 except Exception as e:
                     continue
 
                 t.append(threading.Thread(target=self.downloadImage, args=(url, path,)))
 
-            for thread in t:
-                thread.start()
+            print("[+] Starting threads")
+            [ thread.start() for thread in t ]
 
-            try:
-                t[len(t)-1].join()
-            except Exception as e:
-                continue
+            print("[+] Waiting for threads of sub %s to finish" %(sub))
+            [ thread.join() for thread in t ]
 
+            print("[+] Threads have finished, continuing")
 
     def downloadImage(self, url, path):
         try:
             result = req.get(url, stream=True)
         except Exception as e:
             print("[-] Fetching image %s failed" %(url))
+            self.failed += 1
             return
 
         if not result.status_code == 200:
             print("[-] URL {} returned {}".format(url, result.status_code))
+            self.failed += 1
             return
 
         try:
@@ -83,16 +92,25 @@ class Download():
                 shutil.copyfileobj(result.raw, f)
         except Exception as e:
                 print("[-] Writing %s failed" %(path))
+                self.failed += 1
+                return
 
-    def printEndTime(self):
-        print("[+] Finished downloading {} subredddits in {} seconds".format(len(self.subs),(ceil((time( ) - self.timeStarted) * 100) / 100)))
+        self.successful += 1
+
+    def printEndStats(self):
+        print(  "\n+===================STATS===========================+",
+                "[+] Finished downloading {} subredddits in {} seconds".format(len(self.subs),(ceil((time( ) - self.timeStarted) * 100) / 100)),
+                "+===================================================+",
+                "[+] Downloaded %d files successfully" %(self.successful),
+                "[-] Download failed on %d files" %(self.failed),
+                "*****************************************************", sep="\n")
 
 def main():
     dl = Download()
     dl.getPostsBySub()
     dl.makeSubDirs()
     dl.downloadAllImages()
-    dl.printEndTime()
+    dl.printEndStats()
 
 if __name__ == '__main__':
     main()
